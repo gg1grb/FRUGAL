@@ -1,0 +1,170 @@
+      subroutine grida
+      implicit none
+
+
+
+#include "param.h"
+#include "coorda.h"
+#include "grdvara.h"
+#include "scalar.h"
+
+#ifdef vvcoarse
+      open(67,file='~/bigdisk//frugalmod/data/griddata18x12',
+     & status='old')
+c     open(67,file=
+c    & '/inet/ocean-disk2/e099/seac/data/griddata18x12',
+     & status='old')
+#endif
+#ifdef vcoarse
+c      open(67,file='~/bigdisk/frugalmod/data/griddata8x6',
+      open(67,file='data/griddata8x6',status='old')
+#endif
+#ifdef coarse
+      open(67,file='~/bigdisk/frugalmod/data/griddata4x3',
+     & status='old')
+#endif
+#ifdef fine
+      open(67,file='~/bigdisk/frugalmod/data/griddata2x1.5'
+     & ,status='old')
+#endif
+#ifdef vcoarse_latlon
+      open(67,file='~/bigdisk/frugalmod/data/griddata6x4.5',
+    & status='old')
+#endif
+#ifdef coarse_latlon
+      open(67,file='~/bigdisk/frugalmod/data/griddata3x2.25',
+     & status='old')
+#endif
+#ifdef fine_latlon
+      open(67,file='~/bigdisk/frugalmod/data/griddata1.5x1.125'
+     & ,status='old')
+#endif
+
+#ifdef cyclic
+      do k=1,(jmta+1)*(imta-2)
+      read(67,*)i,j,xua(i+1,j-1),yua(i+1,j-1)
+#else
+      do k=1,jmta*imta
+      read(67,*)i,j,xua(i,j-1),yua(i,j-1)
+#endif
+      end do
+#ifdef cyclic
+      do k=1,(jmta+1)*(imta-2)
+      read(67,*)i,j,xta(i+2,j),yta(i+2,j)
+#else
+      do k=1,jmta*imta
+      read(67,*)i,j,xta(i+1,j),yta(i+1,j)
+#endif
+      end do
+      close(67)
+
+#ifdef cyclic
+      do j=0,jmta
+      xua(1,j)=xua(imta-1,j)
+      xua(imta,j)=xua(2,j)
+      yua(1,j)=yua(imta-1,j)
+      yua(imta,j)=yua(2,j)
+      if(xua(1,j)-xua(2,j).gt.180.)xua(1,j)=xua(1,j)-360.
+      if(xua(2,j)-xua(1,j).gt.180.)xua(1,j)=xua(1,j)+360.
+      if(xua(imta,j)-xua(imta-1,j).gt.180.)xua(imta,j)=xua(imta,j)-360.
+      if(xua(imta-1,j)-xua(imta,j).gt.180.)xua(imta,j)=xua(imta,j)+360.
+      xta(1,j)=xta(imt-1,j)
+      xta(imt,j)=xta(2,j)
+      yta(1,j)=yta(imt-1,j)
+      yta(imt,j)=yta(2,j)
+      if(xta(1,j)-xta(2,j).gt.180.)xta(1,j)=xta(1,j)-360.
+      if(xta(2,j)-xta(1,j).gt.180.)xta(1,j)=xta(1,j)+360.
+      if(xta(imt,j)-xta(imt-1,j).gt.180.)xta(imt,j)=xta(imt,j)-360.
+      if(xta(imt-1,j)-xta(imt,j).gt.180.)xta(imt,j)=xta(imt,j)+360.
+      end do
+#endif
+c fudge
+      do i=1,imta
+      xua(i,jmta)=xua(i,jmta-1)
+      end do
+
+
+      do j=1,jmta
+      do i=2,imta-1
+      dxta(i,j)=acosd(sind(yua(i,j))*sind(yua(i-1,j))+
+     & cosd(yua(i,j))*cosd(yua(i-1,j))*cosd(xua(i,j)-xua(i-1,j)))
+      dyta(i,j)=acosd(sind(yua(i,j))*sind(yua(i,j-1))+
+     & cosd(yua(i,j))*cosd(yua(i,j-1))*cosd(xua(i,j)-xua(i,j-1)))
+c set zero box sizes to 0.01 to avoid divide by zero
+      if(dxta(i,j).eq.0.0)dxta(i,j)=0.01
+      if(dyta(i,j).eq.0.0)dyta(i,j)=0.01
+      end do
+      end do
+      do j=1,jmta
+      do i=2,imta-1
+      dxua(i,j)=acosd(sind(yta(i,j))*sind(yta(i+1,j))+
+     & cosd(yta(i,j))*cosd(yta(i+1,j))*cosd(xta(i,j)-xta(i+1,j)))
+      dyua(i,j)=acosd(sind(yta(i,j))*sind(yta(i,j+1))+
+     & cosd(yta(i,j))*cosd(yta(i,j+1))*cosd(xta(i,j)-xta(i,j+1)))
+c set zero box sizes to 0.01 to avoid divide by zero
+      if(dxua(i,j).eq.0.0)dxua(i,j)=0.01
+      if(dyua(i,j).eq.0.0)dyua(i,j)=0.01
+      end do
+      end do
+#ifdef cyclic
+      do j=1,jmta
+      dxta(1,j)=dxta(imta-1,j)
+      dxta(imta,j)=dxta(2,j)
+      dyta(1,j)=dyta(imta-1,j)
+      dyta(imta,j)=dyta(2,j)
+      dxua(1,j)=dxua(imta-1,j)
+      dxua(imta,j)=dxua(2,j)
+      dyua(1,j)=dyua(imta-1,j)
+      dyua(imta,j)=dyua(2,j)
+      end do
+#endif
+      do i=1,imta
+      dyta(i,jmta)=dyta(i,jmta-1)
+      end do
+
+
+      do j=1,jmta
+      do i=1,imta
+      dxta(i,j)=dxta(i,j)*radius/radian
+      dxua(i,j)=dxua(i,j)*radius/radian
+      dyta(i,j)=dyta(i,j)*radius/radian
+      dyua(i,j)=dyua(i,j)*radius/radian
+      end do
+      end do
+
+c---------------------------------------------------------------------
+c     compute auxiliary arrays
+c---------------------------------------------------------------------
+
+      do j=1,jmta
+      do i=1,imta
+      phita(i,j)=yta(i,j)/radian
+      phia(i,j)=yua(i,j)/radian
+      sinea(i,j)=sind(yua(i,j))
+      end do
+      end do
+
+      do j=1,jmta
+      do i=1,imta
+      dxtra(i,j)  = c1/dxta(i,j)
+      dxt2ra(i,j) = p5/dxta(i,j)
+      dxt4ra(i,j) = p25/dxta(i,j)
+      dxura(i,j)  = c1/dxua(i,j)
+      dxu2ra(i,j) = p5/dxua(i,j)
+      dxu4ra(i,j) = p25/dxua(i,j)
+      enddo
+      end do
+
+      do j=1,jmta
+      do i=1,imta
+      dytra(i,j)=c1/dyta(i,j)
+      dyt2ra(i,j) = p5/dyta(i,j)
+      dyt4ra(i,j) = p25/dyta(i,j)
+      dyura(i,j)  = c1/dyua(i,j)
+      dyu2ra(i,j) = p5/dyua(i,j)
+      dyu4ra(i,j) = p25/dyua(i,j)
+      end do
+      end do
+
+      return
+      end

@@ -1,0 +1,224 @@
+c===================== include file "embmdata.h" =======================
+c
+c     blkdta for the energy-moisture balance model
+c
+c#include "cembm.h"
+#ifndef ocean_ice
+#include "insolation.h"
+#endif
+c
+      data namix 	/15/
+
+#ifndef insolation_vary
+#ifdef lgm
+#ifdef ice260k
+      data pyear        /-260000.0/
+#else
+#ifdef ice545k
+      data pyear        /-545000.0/
+#else
+#ifdef ice635k
+      data pyear        /-635000.0/
+#else
+#ifdef ice140k
+      data pyear        /-140000.0/
+#else
+#ifdef ice295k
+      data pyear        /-29500.0/
+#else
+#ifdef ice175k
+      data pyear        /-17500.0/
+#else
+#ifdef ice120k
+      data pyear        /-120000.0/
+#else
+#ifdef ice180k
+      data pyear        /-180000.0/
+#else
+#ifdef ice350k
+      data pyear        /-350000.0/
+#else
+#ifdef Plio
+      data pyear        /1997.0/
+#else
+      data pyear        /-21000.0/
+#endif
+#endif
+#endif
+#endif
+#endif
+#endif
+#endif
+#endif
+#endif
+#endif
+#else
+      data pyear 	/1997.0/
+#endif
+#endif
+
+#ifdef lgm
+#ifdef co2_vary
+      data co2startyear /-3000.0/
+      data co2endyear   /-31000.0/
+      data co2ccnv  /  278.6395,
+     &                 267.6872,
+     &                 265.2155,
+     &                 262.7438,
+     &                 256.8450,
+     &                 258.8812,
+     &                 260.4826,
+     &                 261.4776,
+     &                 263.6693,
+     &                 237.9500,
+     &                 236.7044,
+     &                 225.1721,
+     &                 213.5423,
+     &                 201.9125,
+     &                 190.2827,
+     &                 183.1311,
+     &                 186.1839,
+     &                 189.2096,
+     &                 190.0126,
+     &                 190.8155,
+     &                 191.5786,
+     &                 190.6465,
+     &                 189.7145,
+     &                 188.7824,
+     &                 191.4386,
+     &                 194.6306,
+     &                 197.7549,
+     &                 200.8792,
+     &                 204.0034/
+#endif
+#endif
+
+c
+c        can put in skip to change lgm CO2 level to pd
+c
+#ifdef lgm
+#ifdef Plio
+      data co2ccn       /400.0/
+#else
+#ifdef ice260k
+      data co2ccn       /185.0/
+#else
+#ifdef ice545k
+      data co2ccn       /204.6/
+#else
+#ifdef ice635k
+      data co2ccn       /192.1/
+#else
+#if defined ice140k || ice120k
+      data co2ccn       /190.0/
+#else
+#ifdef ice295k
+      data co2ccn       /199.2/
+#else
+#ifdef ice175k
+      data co2ccn       /186.7/
+#else
+#ifdef ice180k
+      data co2ccn       /199.0/
+#else
+#ifdef ice350k
+      data co2ccn       /193.0/
+#else
+      data co2ccn 	/200.0/
+#endif
+#endif
+#endif
+#endif
+#endif
+#endif
+#endif
+#endif
+#endif
+#else
+#ifdef Plio
+      data co2ccn       /400.00/
+#else
+      data co2ccn       /350.0/
+#endif
+#endif
+      data solarconst 	/1.368e6/
+c
+      data ssp 		/1.0e6/
+      data cdatm 	/1.0e-3/
+      data cpatm 	/1.004e7/
+      data ht 		/8.4e5/
+      data hq 		/1.8e5/
+      data hadvect      /0.75e5/
+      data rhoatm 	/1.250e-3/
+c
+      data rhoocn 	/1.035/
+      data esocn 	/5.347e-5/
+      data vlocn 	/2.501e10/
+      data socn 	/34.9e-3/
+c
+      data cdice 	/5.5e-3/
+      data rhoice 	/0.913/
+      data esice 	/5.347e-5/
+      data slice 	/2.835e10/
+      data flice 	/3.34e9/
+      data condice 	/2.1656e5/
+#if defined ocean_ice && defined uvic_ice_cf
+      data kadv 	/128/
+#else
+      data kadv 	/1/
+#endif
+#ifndef ocean_ice
+c
+c     coefficients for solution of eccentricity
+c
+      data ae / 0.01860798, 0.01627522, -.01300660,
+     &  0.00988829, -.00336700, 0.0033077, -.00235400,
+     &  0.00140015, 0.00100700, 0.00085700, 0.00064990,
+     &  0.00059900, 0.00037800, -.00033700, 0.00027600,
+     &  0.00018200, -.00017400, -.00012400, 0.00001250 /
+c
+      data ye / 4.2072050, 7.3460910, 17.8572630,
+     &  17.2205460, 16.8467330, 5.1990790, 18.2310760,
+     &  26.2167580, 6.3591690, 16.2100160, 3.0651810,
+     &  16.5838290, 18.4939800, 6.1909530, 18.8677930,
+     &  17.4255670, 6.1860010, 18.4174410, 0.6678630 /
+c
+      data ze / 28.620089, 193.788772, 308.307024,
+     &  320.199637, 279.376984, 87.195000, 349.129677,
+     &  128.443387, 154.143880, 291.269597, 114.860583,
+     &  332.092251, 296.414411, 145.769910, 337.237063,
+     &  152.092288, 126.839891, 210.667199, 72.108838 /
+c
+c     coefficients for solution of obliquity
+c
+      data aob / -2462.2214466, -857.3232075, -629.3231835,
+     &  -414.2804924, -311.7632587, 308.9408604, -162.5533601,
+     &  -116.1077911, 101.1189923, -67.6856209, 24.9079067,
+     &  22.5811241, -21.1648355, -15.6549876, 15.3936813,
+     &  14.6660938, -11.7273029, 10.2742696 /
+c
+      data yob / 31.609974, 32.620504, 24.172203,
+     &  31.983787, 44.828336, 30.973257, 43.668246,
+     &  32.246691, 30.599444, 42.681324, 43.836462,
+     &  47.439436, 63.219948, 64.230478, 1.010530,
+     &  7.437771, 55.782177, 0.373813 /
+c
+      data zob / 251.9025, 280.8325, 128.3057,
+     &  292.7252, 15.3747, 263.7951, 308.4258, 240.0099,
+     &  222.9725, 268.7809, 316.7998, 319.6024, 143.8050,
+     &  172.7351, 28.9300, 123.5968, 20.2082, 40.8226 /
+c
+c       coefficients for solution of precession
+c
+      data aop / 7391.0225890, 2555.1526947, 2022.7629188,
+     &  -1973.6517951, 1240.2321818, 953.8679112, -931.7537108,
+     &  872.3795383, 606.3544732 /
+c
+      data yop / 31.609974, 32.620504, 24.172203,
+     &  0.636717, 31.983787, 3.138886, 30.973257,
+     &  44.828336, 0.991874 /
+c
+      data zop / 251.9025, 280.8325, 128.3057, 348.1074,
+     &  292.7252, 165.1686, 263.7951, 15.3747, 58.5749 /
+c
+#endif

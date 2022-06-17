@@ -1,0 +1,173 @@
+.
+      subroutine gasbc
+      implicit none
+
+
+c
+c=======================================================================
+c     calculate boundary conditions for the atmospheric model
+c
+c     author:      m.eby                 e-mail=> eby@uvic.ca
+c=======================================================================
+c
+# include "param.h"
+# include "coorda.h"
+# include "csbc.h"
+# include "levinda.h"
+# include "mapsbc.h"
+# include "switch.h"
+# include "ctmngr.h"
+# include "cembm.h"
+# include "atm.h"
+# include "grdvar.h"
+# if defined uvic_ice || defined uvic_embm_ice
+#  include "ice.h"
+# endif
+#include "levind.h"
+
+      real sla,slb,fp,sss
+
+
+      slb = 3.80116e3/ssp
+      fp = -1.9
+
+      avetime = 0.0
+      do j=2,jmtam1
+        do i=1,imta
+
+c-----------------------------------------------------------------------
+c         zero flux totals for new accumulation
+c-----------------------------------------------------------------------
+
+          flux(i,j,1) = 0.0
+          flux(i,j,2) = 0.0
+
+          if (kmta(i,j) .eq. 0) then
+
+c-----------------------------------------------------------------------
+c           set sea surface temperature and surface humidity
+c-----------------------------------------------------------------------
+
+# ifdef uvic_embm_ice
+            surf(i,j,1) = sbcocn(i,j,isst)
+# else
+
+c martin
+c             if (sbcocn(i,j,ihflx) .eq. sla*(fp - surf(i,j,1))) then
+
+c             set surface temperature to atmospheric temperature for
+c             areas where ice would form if there was an ice model
+
+c             surf(i,j,1) = at(i,j,2,1)
+
+c            else
+ 
+             surf(i,j,1) = sbcocn(i,j,isst)
+
+c          endif
+# endif
+	    surf(i,j,2) = slb*exp(17.67*surf(i,j,1)/
+     &                    (surf(i,j,1) + 243.5))
+     
+# ifdef uvic_embm_ice
+c-----------------------------------------------------------------------
+c           calculate freezing point of sea water using UNESCO (1983)
+c-----------------------------------------------------------------------
+
+            sss = 1000.0*sbcocn(i,j,isss) + 35.0
+c problem here due to negative salinity
+            if(sss.lt.0.0)sss=0.0
+            frzpt(i,j) = -.0575*sss + 1.710523e-3*sss**1.5
+     &                   - 2.154996e-4*sss**2
+cifdef mrw_mountains 
+c          frzpt(i,j) = frzpt(i,j) -elev(i,j)/14285.
+cendif
+           fp =  frzpt(i,j)
+# endif
+c-----------------------------------------------------------------------
+c           calculate the downward heat flux to freeze the first layer
+c           this time step (in Wm-2)
+c-----------------------------------------------------------------------
+
+c  nb dts negative here
+
+	    sbcocn(i,j,ihflx) = dz(1)*4.2e4*(-fp + surf(i,j,1))/dts
+	  endif
+
+	enddo
+# ifdef  uvic_embm_seasonal
+
+c-----------------------------------------------------------------------
+c     update insolation for the current day
+c-----------------------------------------------------------------------
+
+        do i=1,imta
+        call insolation (yta(i,j), solins(i,j))
+        end do
+        do i=1,imta
+        toasolar(i,j)=solins(i,j)
+        end do
+
+#endif
+      enddo
+
+#ifdef landevap
+c----------------------------------------------------------------------
+c calculate saturated surface vapour pressure over land
+c----------------------------------------------------------------------
+
+      do j=1,jmta
+      do i=1,imta
+      if(kmta(i,j).eq.1)
+     & surf(i,j,2) = slb*exp(17.67*at(i,j,1,1)/
+     &                    (at(i,j,1,1) + 243.5))
+      end do
+      end do
+#endif
+c----------------------------------------------------------------------
+c  convert wind stress from ocean model to wind speed
+c----------------------------------------------------------------------
+
+      call windsp
+
+#  if defined uvic_embm_astress && !defined uvic_embm_seasonal
+c-----------------------------------------------------------------------
+c     calculate wind stress with new feedback
+c-----------------------------------------------------------------------
+
+      do j=1,jmta
+        do i=1,imta
+          sbcocn(i,j,itaux) = sbcocn(i,j,itaux) - atx(i,j)
+          sbcocn(i,j,itauy) = sbcocn(i,j,itauy) - aty(i,j)
+        enddo
+      enddo
+      call windstress
+      do j=1,jmta
+        do i=1,imta
+          sbcocn(i,j,itaux) = sbcocn(i,j,itaux) + atx(i,j)
+          sbcocn(i,j,itauy) = sbcocn(i,j,itauy) + aty(i,j)
+        enddo
+      enddo
+#  endif
+
+# ifdef uvic_embm_gstress
+c-----------------------------------------------------------------------
+c     calculate geostrophic wind stress
+c-----------------------------------------------------------------------
+
+      call windstress
+
+# endif
+
+# ifdef uvic_embm_CO2
+c-----------------------------------------------------------------------
+c     calcualte CO2 forcing
+c-----------------------------------------------------------------------
+
+      call co2forc
+
+# endif
+
+
+      return
+      end

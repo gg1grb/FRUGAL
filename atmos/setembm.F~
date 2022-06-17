@@ -1,0 +1,371 @@
+      subroutine setembm 
+      implicit none
+c
+c=======================================================================
+c     initialize the energy-moisture balance model
+c     based on code by a.fanning
+c
+c     author:   m.eby   e-mail: eby@uvic.ca
+c=======================================================================
+c
+
+# include "param.h"
+# include "slap.h"
+# include "switch.h"
+# include "coorda.h"
+# include "grdvara.h"
+# include "atm.h"
+# include "cembm.h"
+# ifdef uvic_embm_ice
+#  include "ice.h"
+# endif
+# ifdef mrw_rivers
+#  include "riv.h"
+# endif
+#  include "ctmngr.h"
+# include "levinda.h"
+#include "levind.h"
+# include "mapsbc.h"
+# include "csbc.h"
+#include "scalar.h"
+#include "iounit.h"
+
+      real si,sj,asj,cj,c4j,c4jx
+      namelist /co2/ co2ccn, co2ccni, co2ccnf, co2yri, co2yrf
+      namelist /paleo/ pyear
+      namelist /ice/ kadv
+c---------------------------------------------------------------------
+c     set default CO2 parameters for constant co2ccn
+c---------------------------------------------------------------------
+
+      co2ccni = co2ccn
+      co2ccnf = co2ccn
+#if defined transient || defined trad_ch2o
+      co2ccni = co2ccn * exp(0.01*countloop/720.)
+      co2ccnf=co2ccn
+      print *,'years ',years,' co2 ',co2ccni
+#endif
+
+100   continue
+
+c----------------------------------------------------------------------
+c     set physical constants
+c----------------------------------------------------------------------
+
+      rho0     = 1.035
+      rho0r    = c1/rho0
+      grav     = 980.6
+      radius   = 6370.0e5
+
+# ifdef uvic_embm_CO2
+c-----------------------------------------------------------------------
+c     calculate the relative CO2 forcing term
+c-----------------------------------------------------------------------
+
+      if (co2ccni .eq. co2ccnf .and. co2ccni .ne. co2ccn) then 
+        co2ccni = co2ccn
+        co2ccnf = co2ccn
+      endif
+
+      call co2forc
+
+      write(stdout,*) 
+      if (co2ccni .eq. co2ccnf) then 
+        write(stdout,*) 'CO2 concentration (versus today) ='
+     &,   co2ccn/350.0
+        write(stdout,*) 'Yields radiative forcing (W/m2) = '
+     &,   1.0e-3*anthro
+      else
+        write(stdout,*) 'CO2 concentration varying with time'
+        write(stdout,*) 'Initial   ',co2ccni,' before year ',co2yri
+        write(stdout,*) ' Yields relative radiative forcing (W/m2) = '
+     &,   1.0e-3*5.77e03*alog(co2ccni/350.0)
+        write(stdout,*) 'Currently ',co2ccn, ' for year    ',relyr
+        write(stdout,*) ' Yields relative radiative forcing (W/m2) = '
+     &,   1.0e-3*5.77e03*alog(co2ccn/350.0)
+        write(stdout,*) 'Final     ',co2ccnf,' after year  ',co2yrf
+        write(stdout,*) ' Yields relative radiative forcing (W/m2) = '
+     &,   1.0e-3*5.77e03*alog(co2ccnf/350.0)
+      endif
+
+# endif
+c-----------------------------------------------------------------------
+c     calculate the expansion coefficients for Berger's solution for 
+c     the year of the initial conditions
+c-----------------------------------------------------------------------
+
+      call berger
+c-----------------------------------------------------------------------
+c     calculate latitude dependent variables
+c-----------------------------------------------------------------------
+
+      pi = 4.0*atan(1.0)
+      omega = pi/43082.0
+
+      do j=1,jmta
+      do i=1,imta
+        sj = sin(phita(i,j))
+        asj = abs(sj)
+        c4j = cos(4.0*phita(i,j))
+        if(j.gt.3)c4jx= cos(4.0*phita(i,j-3))
+c-----------------------------------------------------------------------
+c       calculate coriolis parameter
+c-----------------------------------------------------------------------
+
+        cori(i,j,1) = 2.0*omega*sinea(i,j)
+        cori(i,j,2) = -2.0*omega*sinea(i,j)
+
+# ifndef uvic_embm_seasonal
+c-----------------------------------------------------------------------
+c       calculate annual average insolation
+c-----------------------------------------------------------------------
+
+        solins(i,j) = 0.0
+        do n=1, 365
+          call insolation (float(n), yta(i,j), si)
+          solins(i,j) = solins(i,j) + si
+        enddo
+        solins(i,j) = (solins(i,j) + 0.25*si) /365.25
+        toasolar(i,j)=solins(i,j)
+# endif
+
+
+c-----------------------------------------------------------------------
+c       coalbedo
+c-----------------------------------------------------------------------
+
+        coalbedo(i,j) = 0.75 - 0.18*sj**2
+c martin
+        if(abs(yta(i,j)).gt.60.)coalbedo(i,j) = 0.75 - 0.27*sj**2
+# ifdef uvic_embm_ice
+         coalice(i,j) = 0.65 - 0.18*sj**2 
+# ifdef icexreflect
+c have sometimes used -0.25 here or -0.2 or -0.225
+        coalice(i,j)=coalice(i,j)-0.2125 - 0.09*sj**2
+c        coalice(i,j)=coalice(i,j)-0.2 - 0.09*sj**2
+#endif
+         if(yta(i,j).lt.-60.)coalice(i,j) = 0.45 - 0.18*sj**2
+# else
+        if(j.eq.1.and.first)
+     & write (stdout,*) '==> Warning: ice model is not defined.'
+     &,   ' heat flux may be limited to prevent freezing sst.'
+# endif
+c---------------------------------------------------------------------
+c       Graves et al, 1993 (fudge) 
+c       coalbedo(j) = 0.7995 - 0.315*sj**2
+c       coalice(j) = 0.6945 - 0.315*sj**2
+c
+c       North et al 1983
+c       coalbedo(j) = 0.75 - 0.18*sj**2
+c       coalice(j) = 0.65 - 0.18*sj**2 
+c
+c       Flannery et al 1983
+c       coalbedo(j) = 0.785 - 0.263*sj**2
+c       coalice(j) = 0.65 - 0.18*sj**2 
+c
+c       planetary and atmospheric emissivity
+c-----------------------------------------------------------------------
+
+# ifdef uvic_embm_planetary
+        esplnt(i,j) = 5.57e-5*(0.5531 - 0.1296*sj + 0.6796*sj**2 
+     &           + 0.7116*sj**3 - 2.7940*sj**4 - 1.3592*sj**5 
+     &           + 3.8831*sj**6 + 0.8348*sj**7 - 1.9536*sj**8)
+c martin
+c     if(yta(i,j).lt.c0.and.esplnt(i,j).lt.2.5e-5)
+c    &            esplnt(i,j)=2.5e-5
+#  endif
+        esatm(i,j) = 5.57e-5*(0.8666 + 0.0408*sj - 0.2553*sj**2 
+     &          - 0.4660*sj**3 + 0.9877*sj**4 + 2.0257*sj**5 
+     &          - 2.3374*sj**6 - 3.1990*sj**7 + 2.8581*sj**8
+     &          + 1.6070*sj**9 -1.2685*sj**10)
+        scatter(i,j) = 0.30
+
+c-----------------------------------------------------------------------
+c       diffusivities
+c-----------------------------------------------------------------------
+
+        da(i,j,1) = 3.0e10*(0.81 - 1.08*sj**2 + 0.74*sj**4)
+c       da(i,j,2) = 1.7e10*(1.9823 - 17.3501*asj + 117.2489*asj**2
+c    &          -274.1129*asj**3 + 258.2244*asj**4 - 85.7967*asj**5)
+        if(yta(i,j).lt.36.)then
+        da(i,j,2) = 1.7e10*(1.9823 - 17.3501*asj + 117.2489*asj**2
+     &          -274.1129*asj**3 + 258.2244*asj**4 - 85.7967*asj**5
+     &         +(1.+c4jx)*4.5)
+       elseif(yta(i,j).gt.0.0)then
+        da(i,j,2) = 1.7e10*(1.9823 - 17.3501*asj + 117.2489*asj**2
+     &          -274.1129*asj**3 + 258.2244*asj**4 - 85.7967*asj**5
+     &         +(1.-c4j)*2.0)
+       else
+        da(i,j,2) = 1.7e10*(1.9823 - 17.3501*asj + 117.2489*asj**2
+     &          -274.1129*asj**3 + 258.2244*asj**4 - 85.7967*asj**5)
+      endif
+      if(yta(i,j).lt.-80.0.or.yta(i,j).gt.72.0)da(i,j,2)=da(i,j,2)/3.
+c     if(yta(i,j).lt.-60.0)da(i,j,1)=da(i,j,1)/2.
+c     da(i,j,2)=da(i,j,2)*0.5
+c martin
+cifdef vvcoarse
+c       if(j.eq.8)then
+cendif
+cifdef vcoarse
+c       if(j.eq.15)then
+cendif
+c       da(i,j,2)=1.7e8*(1.9823 - 17.3501*asj + 117.2489*asj**2
+c    &          -274.1129*asj**3 + 258.2244*asj**4 - 85.7967*asj**5)
+c       endif
+
+        do n=3,nat
+          da(i,j,n) = 1.0e10
+        enddo	
+        end do
+      end do
+
+c-----------------------------------------------------------------------
+c     zero the solver work space
+c-----------------------------------------------------------------------
+
+      do i=1,lenw
+        rwork(i) = 0.0e0
+      enddo
+      do i=1,leniw
+        iwork(i) = 0
+      enddo
+
+      call indexmaps
+
+c-----------------------------------------------------------------------
+c     Calculate coefficients for the matrix inversion of tracers
+c-----------------------------------------------------------------------
+
+      do n=1,nat
+         sltol(n) = 1.0e-11
+         if (n .eq. 1) sltol(n) = 1.0e-4
+        do lf=1,2
+          dts = -2.0*dtatm
+          if (lf .eq. 2) dts = -dtatm
+          call coef (n)
+        enddo
+      enddo
+
+# ifdef uvic_embm_ice
+c-----------------------------------------------------------------------
+c     check latent heats will sum to zero
+c-----------------------------------------------------------------------
+
+      if (slice .ne. vlocn + flice) write (stdout,'(/,a)')       
+     &   '==> Warning: changing latent heat of fusion to conserve heat'
+        flice = slice - vlocn
+
+# endif
+
+# ifdef uvic_embm_seasonal_average
+c-----------------------------------------------------------------------
+c     initialize running annual averages
+c-----------------------------------------------------------------------
+
+      totaltime = 0.0
+      do j=1,jmta
+        do i=1,imta
+          atbar(i,j) = 0.0
+          aqbar(i,j) = 0.0
+#  ifdef uvic_embm_astress
+          rtbar(i,j) = tbar(i,j)
+          rqbar(i,j) = qbar(i,j)
+#  else
+          rtbar(i,j) = 0.0
+          rqbar(i,j) = 0.0
+#  endif
+
+        enddo
+      enddo
+
+# endif
+c-----------------------------------------------------------------------
+c     set initial conditions or read a restart
+c-----------------------------------------------------------------------
+
+      call initatmos
+
+# ifdef uvic_ice_cf
+c-----------------------------------------------------------------------
+c     calculate C-grid ice velocity masks
+c-----------------------------------------------------------------------
+c
+      do j=1,jmtm1
+        do i=1,imtm1
+          uvmx(i,j) = 0.0
+          uvmy(i,j) = 0.0
+          if (kmt(i,j)*kmt(i+1,j) .gt. 0) uvmx(i,j) = 1.0
+          if (kmt(i,j)*kmt(i,j+1) .gt. 0) uvmy(i,j) = 1.0
+        enddo
+      enddo
+      call setbcx (uvmx, imt, jmt)
+      call setbcx (uvmy, imt, jmt)
+c
+# endif
+
+
+# if defined uvic_embm_astress || defined uvic_embm_gstress
+c-----------------------------------------------------------------------
+c     calculate mask for wind stress calculations
+c-----------------------------------------------------------------------
+
+      do j=2,jmta
+        do i=2,imta
+          maskw(i,j) = 
+     &       1-min(kmta(i,j),kmta(i-1,j),kmta(i,j-1),kmta(i-1,j-1))
+        enddo
+      enddo
+
+# endif
+# if defined uvic_embm_seasonal && defined uvic_embm_astress
+      call windstress
+
+# endif
+
+      return
+      end
+
+
+
+
+# ifdef uvic_embm_CO2
+
+      subroutine co2forc
+      implicit none
+
+c=======================================================================
+c     calculate CO2 forcing as a function of time
+c     based on code by a.fanning
+c
+c     author:   m.eby   e-mail: eby@uvic.ca
+c=======================================================================
+
+# include "cembm.h"
+# include "ctmngr.h"
+
+c-----------------------------------------------------------------------
+c     set concentration as a function of time
+c-----------------------------------------------------------------------
+
+      if (relyr .le. co2yri) then 
+        co2ccn = co2ccni
+      else
+        if (relyr .ge. co2yrf) then
+          co2ccn = co2ccnf
+        else
+          wt = (relyr - co2yri)/(co2yrf - co2yri)
+          co2ccn = wt*(co2ccnf - co2ccni) + co2ccni
+        endif
+      endif
+
+c-----------------------------------------------------------------------
+c     current CO2 concentration is assumed to be 350 ppm
+c     relative forcing (anthro) is added to current forcing
+c-----------------------------------------------------------------------
+
+      anthro = 5.77e03*alog(co2ccn/350.0)
+
+      return
+      end
+#endif
+

@@ -1,0 +1,5 @@
+\rm -r *.i
+f77 -C -B -P -K -Dgenerate_a_grid *.F
+\mv atmosphere.i atmosphere.f
+f77 -C atmosphere.f
+a.out

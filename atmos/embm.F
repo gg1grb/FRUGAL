@@ -1,0 +1,308 @@
+      subroutine embm
+      implicit none
+c
+c=======================================================================
+c
+c                 UVic Energy-Moisture Balance Model
+c                            Version 1.1
+c
+c
+c     A simple atmospheric model developed by researchers at the
+c     Climate Research Laboratory, in the School of Earth and Ocean 
+c     Sciences, located at the University of Victoria, Victoria, 
+c     B.C., Canada.
+c                                
+c     The model is based primarily on the work of Augustus Fanning.
+c
+c     Fanning, A.F. and A.J. Weaver, An atmospheric energy-moisture
+c       balance model: climatology, interpentadal climate change, 
+c       and coupling to an ocean general circulation model, 
+c       J. Geophys. Res., 101, 15,111-15,128, 1996
+c 
+c     Documentation:
+c
+c     For documentation refer to a postscript manual which may be 
+c     ordered by contacting embm@seos.uvic.ca
+c
+c     Bug reports or questions: 
+c
+c     Each section of code has a code author. Please direct questions 
+c     or problems to these authors at embm@seos.uvic.ca
+c        
+c     Requirements:
+c
+c     Standard fortran 77 is used (except for namelist which is 
+c     fortran 90 compliant, do enddo, use of "max" function in 
+c     parameter statements and variable names > than 6 characters)
+c     The preprocessor "cpp" (available on systems using "c" or UNIX)
+c
+c     Disclaimer:
+c
+c     The UVic Energy-Moisture Balance Model (EMBM) is a climate 
+c     modeling research tool developed at UVic. Others may use it 
+c     freely but we assume no responsibility for problems or 
+c     incorrect use of EMBM. It is left to the user to satisfy 
+c     (him/her)self that a particular configuration is working 
+c     correctly.
+c       
+c     author:   m.eby   e-mail: eby@uvic.ca
+c=======================================================================
+c
+#include "param.h"
+#include "cembm.h"
+#include "atm.h"
+#include "coorda.h"
+#include "grdvara.h"
+#include "ctmngr.h"
+#ifdef adjustheatdiffusivity
+      real tspole,tnpole
+#endif
+#ifdef adjustwvdiffusivity
+#include "fields.h"
+#endif
+#ifdef cmeans3
+#include "cmipmean3.h"
+#include "csbc.h"
+#include "mapsbc.h"
+#include "fields.h"
+#endif
+#ifdef Plio && robust
+#include "levinda.h"
+#include "ice.h"
+      real gammaa
+#endif
+      real si,sj,asj,cj,c4j,c4jx
+      real fx
+
+c-----------------------------------------------------------------------
+c     increment counter and set the time step type
+c-----------------------------------------------------------------------
+
+      nats = nats + 1
+      if (nats .gt. namix) then
+        lf = 2
+        dts = dtatm
+        nats = 1
+      else
+        lf = 1
+        dts = 2.0*dtatm
+      endif
+
+c calculate feedbacks on atmospheric diffusivities
+#ifdef adjustheatdiffusivity
+      tnpole=0.0
+      tspole=0.0
+      fx=0.0
+
+      do i=2,imta-1
+      tspole=tspole+at(i,2,1,1)
+      end do
+      tspole=tspole/float(imta-2)
+
+      do j=1,jmta
+      do i=2,imta-1
+      if(yta(i,j).ge.80.)then
+      fx=fx+1
+      tnpole=tnpole+at(i,j,1,1)
+      endif
+      end do
+      end do
+      tnpole=tnpole/fx
+
+      heatdiffusivityfbnorth=heatdiffusivityfbnorth-
+     & (-20.-tnpole)*dts*3.e-10
+      heatdiffusivityfbsouth=heatdiffusivityfbsouth-
+     & (-20.-tspole)*dts*3.e-10
+      write(88,*)itt,tnpole,tspole,
+     &  heatdiffusivityfbnorth,heatdiffusivityfbsouth
+#endif
+#ifdef adjustwvdiffusivity
+c     wnpole=0.0
+c     wspole=0.0
+c     fx=0.0
+
+c     do i=2,imta-1
+c     wspole=wspole+at(i,2,1,2)
+c     end do
+c     wspole=wspole/float(imta-2)
+
+c     do j=1,jmta
+c     do i=2,imta-1
+c     if(yta(i,j).ge.80.)then
+c     fx=fx+1
+c     wnpole=wnpole+at(i,j,1,2)
+c     endif
+c     end do
+c     end do
+c     wnpole=wnpole/fx
+
+c     wvdiffusivityfbnorth=wvdiffusivityfbnorth-
+c    & (-20.-wnpole)*dts*3.e-8
+c     wvdiffusivityfbsouth=wvdiffusivityfbsouth-
+c    & (-20.-wspole)*dts*3.e-8
+c     write(89,*)itt,wvdiffusivityfbnorth,wvdiffusivityfbsouth
+
+      wvdiffusivityfbnorth=wvdiffusivityfbnorth-
+     & (20.-atover)*dts*3.e-10
+      wvdiffusivityfbsouth=wvdiffusivityfbsouth-
+     & (140.-btdpkeep)*dts*3.e-10
+      if(wvdiffusivityfbnorth.gt.2.)wvdiffusivityfbnorth=2.0
+      if(wvdiffusivityfbnorth.lt.0.5)wvdiffusivityfbnorth=0.5
+      if(wvdiffusivityfbsouth.gt.2.)wvdiffusivityfbsouth=2.0
+      if(wvdiffusivityfbsouth.lt.0.5)wvdiffusivityfbsouth=0.5
+
+      write(89,*)itt,wvdiffusivityfbnorth,wvdiffusivityfbsouth,
+     & atover,btdpkeep
+
+#endif
+
+c recalculate diffusivities
+
+#ifdef adjustheatdiffusivity
+      do j=1,jmta
+       do i=1,imta
+        sj = sin(phita(i,j))
+        asj = abs(sj)
+        c4j = cos(4.0*phita(i,j))
+        if(j.gt.3)c4jx= cos(4.0*phita(i,j-3))
+      if(yta(i,j).ge.0.0)then
+        da(i,j,1) = heatdiffusivityfbnorth*
+     &   3.0e10*(0.81 - 1.08*sj**2 + 0.74*sj**4)
+      else
+        da(i,j,1) = heatdiffusivityfbsouth*
+     &   3.0e10*(0.81 - 1.08*sj**2 + 0.74*sj**4)
+      endif
+      end do
+      end do
+#endif
+
+#ifdef adjustwvdiffusivity
+      do j=1,jmta
+       do i=1,imta
+        sj = sin(phita(i,j))
+        asj = abs(sj)
+        c4j = cos(4.0*phita(i,j))
+        if(j.gt.3)c4jx= cos(4.0*phita(i,j-3))
+      if(yta(i,j).ge.0.0)then
+        da(i,j,2) = wvdiffusivityfbnorth*
+     & 1.7e10*(1.9823 - 17.3501*asj + 117.2489*asj**2
+     &          -274.1129*asj**3 + 258.2244*asj**4 - 85.7967*asj**5
+     &         +(1.+c4jx)*4.5)
+      else
+        da(i,j,2) = wvdiffusivityfbsouth*
+     & 1.7e10*(1.9823 - 17.3501*asj + 117.2489*asj**2
+     &          -274.1129*asj**3 + 258.2244*asj**4 - 85.7967*asj**5
+     &         +(1.+c4jx)*4.5)
+      endif
+      end do
+      end do
+#endif
+
+c-----------------------------------------------------------------------
+c     calculate fluxes at tau
+c-----------------------------------------------------------------------
+
+      call fluxes
+
+# ifdef uvic_embm_ice
+c-----------------------------------------------------------------------
+c     compute ice fluxes at tau and ice thickness and area at tau+1
+c-----------------------------------------------------------------------
+
+#  ifdef uvic_ice_cf
+      call cavfld
+#  endif
+      call therm
+#endif
+c-----------------------------------------------------------------------
+c     calculate new right hand side (forcing) for all tracers
+c-----------------------------------------------------------------------
+
+      call newrhs
+
+c-----------------------------------------------------------------------
+c     compute atmospheric tracers at tau+1. start with humidity so that
+c     the precipitation flux can be calculated for latent heat 
+c-----------------------------------------------------------------------
+
+      call solve (2)
+
+      call precipitate
+
+      call solve (1)
+c
+c   if Pliocene fine run initially relax towards SST
+#ifdef Plio && robust
+      gammaa=0.1
+      do j=1,jmta
+      do i=1,imta
+      if(kmta(i,j).eq.0) then
+      at(i,j,2,1)=at(i,j,2,1) + gammaa*(surf(i,j,1)-at(i,j,2,1)) +
+     & gammaa*0.1*(tice(i,j)-at(i,j,2,1))
+      endif
+      enddo
+      enddo
+#endif
+
+      do n=3,nat
+        call solve (n)
+      enddo
+
+      call sumflux
+
+#ifdef cmeans3
+      if(itt.ge.cmipoutput(3,1).and.itt.le.cmipoutput(3,2))then
+      do j=1,jmta
+      do i=1,imta
+c surface pressure - in winds.F
+
+c total precip
+      a2d3(i,j,2)=a2d3(i,j,2)+precip(i,j)
+c temp
+      a2d3(i,j,3)=a2d3(i,j,3)+at(i,j,2,1)
+c wsx
+      a2d3(i,j,4)=a2d3(i,j,4)+sbcocn(i,j,itaux)
+c wsy
+      a2d3(i,j,5)=a2d3(i,j,5)+sbcocn(i,j,itauy)
+c surface latent heat flux
+      a2d3(i,j,6)=a2d3(i,j,6)+upltnt(i,j)
+c surface sensible heat flux
+      a2d3(i,j,7)=a2d3(i,j,7)+upsens(i,j)
+c net downward surface longwave
+      a2d3(i,j,8)=a2d3(i,j,8)+uplwr(i,j)
+c net down surface shortwave
+      a2d3(i,j,9)=a2d3(i,j,9)+dnswr(i,j)
+c surface temp
+      a2d3(i,j,10)=a2d3(i,j,10)+surf(i,j,1)+273.15
+c atmospheric water vapour content - in winds.F
+
+c runoff flux
+#ifdef landevap
+      if(mask(i,j).eq.0)
+     & a2d3(i,j,12)=a2d3(i,j,12)+(precip(i,j)-evap(i,j))*10.
+#else
+      if(mask(i,j).eq.0)
+    &  a2d3(i,j,12)=a2d3(i,j,12)+precip(i,j)*10.
+#endif
+c u wind
+      a2d3(i,j,13)=a2d3(i,j,13)+spdu(i,j)
+c v wind
+      a2d3(i,j,14)=a2d3(i,j,14)+spdv(i,j)
+c specific humidity
+      a2d3(i,j,15)=a2d3(i,j,15)+at(i,j,2,2)
+c incoming toa shortwave
+      a2d3(i,j,16)=a2d3(i,j,16)+solins(i,j)
+c outgoing toa shortwave
+      a2d3(i,j,17)=a2d3(i,j,17)+solins(i,j)*scatter(i,j)
+c toa outgoing longwave
+      a2d3(i,j,18)=a2d3(i,j,18)+outlwr(i,j)
+
+
+      end do
+      end do
+      endif
+#endif
+
+
+      return
+      end

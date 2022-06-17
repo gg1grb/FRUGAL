@@ -1,0 +1,373 @@
+
+      subroutine windstress
+      implicit none
+c
+c=======================================================================
+c     calculate the geostrophic wind stress and wind speed or anomalies
+c     based on code by a.fanning
+c
+c     author:   m.eby   e-mail: eby@uvic.ca
+c=======================================================================
+c
+
+
+# if defined uvic_embm_astress || defined uvic_embm_gstress
+#  include "param.h"
+#  include "coorda.h"
+#  include "csbc.h"
+#  include "grdvara.h"
+#  include "mapsbc.h"
+#  include "levinda.h"
+#  include "atm.h"
+#  include "cembm.h"
+#include "scalar.h"
+#ifdef cmeans3
+#include "cmipmean3.h"
+#include "fields.h"
+#endif
+c
+      integer ll
+      real press(imta,jmta),drag
+      real rd,angle,contr,rnot,taumax,cosa,sina,spdmax,
+     & rlat,ayu,sa,ca,const,diag1,diag0,adpdy,adpdx,vg,ug,ugr,vgr,
+     & scale,scale2,tanom,qanom,fx,fy,epsln
+c#  ifdef uvic_embm_gstress
+c     real atx(imta,jmta), aty(imta,jmta) 
+c#  endif
+
+#  if defined uvic_embm_astress && defined uvic_embm_gstress
+      write (*,*)
+     & '==> Error: uvic_embm_astress and uvic_embm_gstress are not     '
+     &,'           compatable. define only one or the other            '
+      stop  '=> subroutine windstress in winds.F'
+# endif
+
+      rd = 287.0e4 		! ideal gas constant in cm^2/K/s^2
+      angle = 20.0/radian 	! turning angle (from Gill 1982 p.328)
+      contr = 0.5 		! contraction factor
+      rnot = 1.0/43200.0        ! time scale for equatorial damping 
+      taumax = 3.0		! maximum allowable stress anomaly 
+      epsln=1.e-20
+
+      drag = cdatm*rhoatm
+      cosa = cos(angle)
+      sina = sin(angle)
+
+c-----------------------------------------------------------------------
+c     calculate the pressure using p = rd*rhoatm*t(1 + 0.61*q) and the 
+c     anomoly panom = rd*rhoatm*(tanom(1 + 0.61*qbar) + 0.61*qanom*t)
+c     where tanom = t - tbar (degrees K) and qanom = q - qbar (g/g)
+c     see Peixoto and Oort "Physics of Climate", p 53
+c     note: (g/g is used instead of g/kg as in Peixoto and Oort)
+c-----------------------------------------------------------------------
+
+      do j=2,jmtam1
+	do i=2,imtam1
+#  ifdef uvic_embm_gstress
+          press(i,j) = rd*rhoatm*at(i,j,2,1)*(1.0 + 0.61*at(i,j,2,2))
+#  else
+c 	  tanom = at(i,j,2,1) - tbar(i,j)
+c         qanom = at(i,j,2,2) - qbar(i,j)
+c          tanom = at(i,j,2,1) - zat(i,j)
+c          qanom = at(i,j,2,2) - zah(i,j)
+          tanom = at(i,j,2,1) - zat(j)
+          qanom = at(i,j,2,2) - zah(j)
+          press(i,j) = rd*rhoatm*(tanom*(1.0 + 0.61*zah(j))
+     &               + 0.61*qanom*(at(i,j,2,1) + 273.15))
+#  endif
+#ifdef cmeans3
+      if(itt.ge.cmipoutput(3,1).and.itt.le.cmipoutput(3,2))then
+c air pressure at sea level
+      a2d3(i,j,1)=a2d3(i,j,1)+press(i,j)*0.1
+c atmospheric water vapour content
+      a2d3(i,j,11)=a2d3(i,j,11)+at(i,j,2,2)*press(i,j)/grav*10.
+      endif
+#endif
+        enddo
+      enddo
+      call embmbc (press) 
+
+c-----------------------------------------------------------------------
+c     calculate the geostrophic velocities on uv grid (cm/s)
+c-----------------------------------------------------------------------
+
+      spdmax = 0.0
+      do j=2,jmtam1
+	do i=2,imtam1
+        rlat = rnot*exp(-((yua(i,j)/15.0)**2.0))
+        ayu = abs(yua(i,j))
+        if (ayu .le. 0.1) then
+          sa = 0.0
+          ca = 1.0
+        else
+          sa = sina*yua(i,j)/ayu
+          ca = cosa
+        endif
+        const = contr/(rhoatm*(rlat**2 + cori(i,j,1)**2))
+          if (maskw(i,j) .gt. 0.and.(j.lt.23.or.j.gt.37)) then
+            diag1 = press(i+1,j+1) - press(i,j)
+            diag0 = press(i,j+1) - press(i+1,j)
+            adpdy  = (diag1 + diag0)*dyu2ra(i,j)
+            adpdx  = (diag1 - diag0)*dxu2ra(i,j)*cstra(i,j)
+
+            vg =  const*(cori(i,j,1)*adpdx - rlat*adpdy)
+            ug = -const*(rlat*adpdx + cori(i,j,1)*adpdy)
+            ugr = ug*ca - vg*sa
+            vgr = ug*sa + vg*ca
+
+#  ifdef uvic_embm_astress
+            aspd(i,j) = sqrt(ugr**2 + vgr**2)
+            spdmax = max(spdmax, aspd(i,j))
+            atx(i,j) = drag*ugr*aspd(i,j)
+            aty(i,j) = drag*vgr*aspd(i,j)
+#  else
+            spd(i,j) = sqrt(ugr**2 + vgr**2)
+            spdmax = max(spdmax, spd(i,j))
+            atx(i,j) = drag*ugr*spd(i,j)
+            aty(i,j) = drag*vgr*spd(i,j)
+#  endif
+          endif
+        enddo
+      enddo
+
+c-----------------------------------------------------------------------
+c     scale down the wind stress if necessary
+c-----------------------------------------------------------------------
+
+      if (spdmax .gt. 0.0) then
+        scale2 = min(1.0, taumax/(drag*spdmax**2))
+        if (scale2 .lt. 1.0) then
+          write(*,*) '==> Warning: stress anomaly scaled by ', scale2
+          scale = sqrt(scale2)
+          do j=2,jmtam1
+            do i=2,imtam1
+              if (maskw(i,j) .gt. 0) then
+#  ifdef uvic_embm_astress
+c martin
+c               aspd(i,j) = aspd(i,j)*scale
+c               atx(i,j) = atx(i,j)*scale2
+c               aty(i,j) = aty(i,j)*scale2
+                aspd(i,j) = aspd(i,j)*scale
+                aspd(i,j)=min(aspd(i,j),(sqrt(taumax/rhoatm/cdatm)))
+                if(atx(i,j).gt. taumax)atx(i,j)= taumax
+                if(atx(i,j).lt.-taumax)atx(i,j)=-taumax
+                if(aty(i,j).gt. taumax)aty(i,j)= taumax
+                if(aty(i,j).lt.-taumax)aty(i,j)=-taumax
+#  else
+                spd(i,j) = spd(i,j)*scale
+                atx(i,j) = atx(i,j)*scale2
+                aty(i,j) = aty(i,j)*scale2
+#  endif
+              endif
+            enddo
+          enddo
+        endif
+      endif
+      call embmbc (atx) 
+      call embmbc (aty)
+#  ifdef uvic_embm_gstress
+
+      do j=2,jmtam1
+        do i=2,imtam1
+            sbcocn(i,j,itaux) = atx(i,j)
+            sbcocn(i,j,itauy) = aty(i,j)
+        enddo
+      enddo
+#  endif
+c martin
+c------------------------------------------------------------------
+c  smooth anomalous fields
+c------------------------------------------------------------------
+#ifdef cyclic
+      do j=1,jmta
+      atx(1,j)=atx(imta-1,j)
+      atx(imta,j)=atx(2,j)
+      aty(1,j)=aty(imta-1,j)
+      aty(imta,j)=aty(2,j)
+      aspd(1,j)=aspd(imta-1,j)
+      aspd(imta,j)=aspd(2,j)
+      end do
+#endif
+      do j=2,jmta-1
+      do i=2,imta-1
+      press(i,j)=c0
+      end do
+      end do
+      do j=2,jmta-1
+      do i=2,imta-1
+      do l=-1,1
+      do ll=-1,1
+      press(i,j)=press(i,j)+atx(i+l,j+ll)
+      end do
+      end do 
+      end do
+      end do
+      do j=2,jmta-1
+      do i=2,imta-1
+      atx(i,j)=press(i,j)/9.
+      end do
+      end do
+      do j=2,jmta-1
+      do i=2,imta-1
+      press(i,j)=c0
+      end do
+      end do
+      do j=2,jmta-1
+      do i=2,imta-1
+      do l=-1,1
+      do ll=-1,1
+      press(i,j)=press(i,j)+aty(i+l,j+ll)
+      end do
+      end do 
+      end do
+      end do
+      do j=2,jmta-1
+      do i=2,imta-1
+      aty(i,j)=press(i,j)/9.
+      end do
+      end do
+      do j=2,jmta-1
+      do i=2,imta-1
+      press(i,j)=c0
+      end do
+      end do
+      do j=2,jmta-1
+      do i=2,imta-1
+      do l=-1,1
+      do ll=-1,1
+      press(i,j)=press(i,j)+aspd(i+l,j+ll)
+      end do
+      end do
+      end do
+      end do
+      do j=2,jmta-1
+      do i=2,imta-1
+      aspd(i,j)=press(i,j)/9.
+      end do
+      end do
+#ifdef cyclic
+      do j=1,jmta
+      atx(1,j)=atx(imta-1,j)
+      atx(imta,j)=atx(2,j)
+      aty(1,j)=aty(imta-1,j)
+      aty(imta,j)=aty(2,j)
+      aspd(1,j)=aspd(imta-1,j)
+      aspd(imta,j)=aspd(2,j)
+      end do
+#endif
+#ifdef uvic_embm_astress
+
+      do j=2,jmtam1
+        do i=2,imtam1
+           sbcocn(i,j,itaux) = atx(i,j)+zwx(i,j)
+           sbcocn(i,j,itauy) = aty(i,j)+zwy(i,j)
+        enddo
+      enddo
+#  endif
+
+c-----------------------------------------------------------------------
+c     do a four point average to get to t from u,v points
+c-----------------------------------------------------------------------
+
+      do j=jmtam1,2,-1
+        do i=imtam1,2,-1
+          if (kmta(i,j) .eq. 0) then
+#  ifdef uvic_embm_astress
+            aspd(i,j) = 0.25*(aspd(i,j) + aspd(i-1,j) + aspd(i,j-1) 
+     &                + aspd(i-1,j-1))
+#  else
+            spd(i,j) = 0.25*(spd(i,j) + spd(i-1,j) + spd(i,j-1)
+     &                + spd(i-1,j-1))
+#  endif
+
+          endif
+        enddo
+      enddo
+#  ifdef uvic_embm_astress
+      call embmbc (aspd) 
+#  else
+      call embmbc (spd)
+#  endif
+# endif
+
+
+
+      return
+      end
+
+      subroutine windsp
+      implicit none
+
+c=======================================================================
+c     convert wind stress tx & ty to wind speed for use in calculating
+c     heat flux from atmosphere
+c     based on code by a.fanning
+c
+c     author:   m.eby   e-mail: eby@uvic.ca
+c=======================================================================
+
+# ifndef uvic_embm_read_my_wspd
+#  include "param.h"
+#  include "atm.h"
+#  include "cembm.h"
+#  include "csbc.h"
+#  include "mapsbc.h"
+#ifdef advectq
+#  include "grdvara.h"
+#endif
+c     calculate wind speed from stress
+      real drag,tau,fx
+      drag = cdatm*rhoatm
+      do j=1,jmta
+        do i=1,imta
+         tau = sqrt(sbcocn(i,j,itaux)**2 + sbcocn(i,j,itauy)**2)
+          spd(i,j) = sqrt(tau/drag)
+        enddo
+      enddo
+
+#ifdef advectq
+c---------------------------------------------------------------------
+c calculate velocity field for use in fluxes.F to calculate advection
+c---------------------------------------------------------------------
+
+      fx=hadvect/hq
+      do j=2,jmta-1
+      do i=2,imta-1
+      spdu(i,j)=sqrt(abs(sbcocn(i,j,itaux)/drag))*fx
+      spdv(i,j)=sqrt(abs(sbcocn(i,j,itauy)/drag))*fx
+      if(sbcocn(i,j,itaux).lt.0.0)spdu(i,j)=-spdu(i,j)
+      if(sbcocn(i,j,itauy).lt.0.0)spdv(i,j)=-spdv(i,j) 
+      end do
+      end do
+
+#ifdef cyclic
+      do j=1,jmta
+      spdu(1,j)=spdu(imta-1,j)
+      spdu(imta,j)=spdu(2,j)
+      spdv(1,j)=spdv(imta-1,j)
+      spdv(imta,j)=spdv(2,j)
+      end do
+#endif
+
+#endif 
+
+
+
+c--------------------------------------------------------------------
+c     do a four point average to get to t from u,v points
+c--------------------------------------------------------------------
+
+      do j=jmtam1,2,-1
+        do i=imtam1,2,-1
+          spd(i,j) = 0.25*(spd(i,j) + spd(i-1,j) + spd(i-1,j-1)
+     &             + spd(i,j-1))
+        enddo
+      enddo
+
+      call embmbc (spd)
+
+#endif
+
+      return
+      end
+
